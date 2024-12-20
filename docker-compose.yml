@@ -1,0 +1,182 @@
+version: '3.6'
+services:
+ zabbix-server:
+    image: "${ZABBIX_SERVER_MYSQL_IMAGE}:${ZABBIX_UBUNTU_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    env_file:
+        - ${ENV_VARS_DIRECTORY}/.env_db_mysql
+    secrets:
+        - MYSQL_USER
+        - MYSQL_PASSWORD
+        - MYSQL_ROOT_PASSWORD
+      #   - client-key.pem
+      #   - client-cert.pem
+      #   - root-ca.pem
+    networks:
+      frontend:
+    depends_on:
+     - mysql-server
+
+
+ zabbix-web-nginx-mysql:
+    image: "${ZABBIX_WEB_NGINX_MYSQL_IMAGE}:${ZABBIX_UBUNTU_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    ports:
+      - 8080:8080
+    env_file:
+      - ${ENV_VARS_DIRECTORY}/.env_db_mysql
+    secrets:
+        - MYSQL_USER
+        - MYSQL_PASSWORD
+        - MYSQL_ROOT_PASSWORD
+      #   - client-key.pem
+      #   - client-cert.pem
+      #   - root-ca.pem
+    networks:
+      frontend:
+    depends_on:
+     - mysql-server
+
+ zabbix-web-service:
+    image: "${ZABBIX_WEB_SERVICE_IMAGE}:${ZABBIX_UBUNTU_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    ports:
+      - target: 10053
+      -  published: "${ZABBIX_WEB_SERVICE_PORT}"
+      - protocol: tcp
+    restart: "${RESTART_POLICY}"
+    attach: false
+    volumes:
+        - ${DATA_DIRECTORY}/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
+    tmpfs: /tmp
+    security_opt:
+        - seccomp:${ENV_VARS_DIRECTORY}/chrome_dp.json
+    deploy:
+        resources:
+          limits:
+            cpus: '0.5'
+            memory: 512M
+          reservations:
+            cpus: '0.25'
+            memory: 256M
+    env_file:
+      - ${ENV_VARS_DIRECTORY}/.env_web_service
+    networks:
+      frontend:
+    stop_grace_period: 5s
+
+ agent2:
+  image: "${ZABBIX_AGENT2_IMAGE}:${ZABBIX_UBUNTU_IMAGE_TAG}${ZABBIX_IMAGE_TAG_POSTFIX}"
+    #init: true
+  ports:
+    - target: 10050
+    - published: "${ZABBIX_AGENT2_PORT}"
+  restart: "${RESTART_POLICY}"
+  attach: false
+
+  volumes:
+   -  /var/run/docker.sock:/var/run/docker.sock
+   - ./zabbix-agent2.conf:/etc/zabbix/zabbix_agent2.conf:rw
+   - /etc/localtime:/etc/localtime:ro
+   - ${DATA_DIRECTORY}/etc/zabbix/zabbix_agentd.d:/etc/zabbix/zabbix_agentd.d:ro
+   - ${DATA_DIRECTORY}/var/lib/zabbix/modules:/var/lib/zabbix/modules:ro
+   - ${DATA_DIRECTORY}/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
+   - ${DATA_DIRECTORY}/var/lib/zabbix/ssh_keys:/var/lib/zabbix/ssh_keys:ro
+  group_add:
+    - ${DOCKER_GROUP_GID}
+  tmpfs: /tmp
+  deploy:
+   resources:
+    limits:
+      cpus: '0.2'
+      memory: 128M
+    reservations:
+      cpus: '0.1'
+      memory: 64M
+   mode: global
+     #env_file:
+     #- ${ENV_VARS_DIRECTORY}/.env_agent
+  privileged: true
+  pid: "host"
+  networks:
+   frontend:
+  stop_grace_period: 5s
+
+
+ mysql-server:
+   image: "${MYSQL_IMAGE}:${MYSQL_IMAGE_TAG}"
+   command:
+       - mysqld
+       - --server-id=1                  # Unique server ID for replication
+       - --log-bin=mysql-bin            # Enable binary logging
+       - --binlog-format=ROW            # Use ROW-based binary log format
+       - --binlog-do-db=zabbix            # Restrict binary logging to 'pdns' database
+       - --skip-mysqlx                  # (Optional) Disable MySQL X plugin
+       - --character-set-server=utf8mb4
+       - --collation-server=utf8mb4_bin
+       - --log_bin_trust_function_creators=1
+     # Use TLS encryption for connections to database
+     #   - --require-secure-transport
+     #   - --ssl-ca=/run/secrets/root-ca.pem
+     #   - --ssl-cert=/run/secrets/server-cert.pem
+     #   - --ssl-key=/run/secrets/server-key.pem
+   ports:
+     - 3306:3306
+   restart: "${RESTART_POLICY}"
+   attach: false
+   volumes:
+       - ${DATA_DIRECTORY}/var/lib/mysql:/var/lib/mysql:rw
+       - ${ENV_VARS_DIRECTORY}/mysql_init/init_proxy_db.sql:/docker-entrypoint-initdb.d/mysql_init_proxy.sql:ro
+     #   - dbsocket:/var/run/mysqld/
+   env_file:
+       - ${ENV_VARS_DIRECTORY}/.env_db_mysql
+   environment:
+       - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/MYSQL_ROOT_PASSWORD
+   secrets:
+       - MYSQL_USER
+       - MYSQL_PASSWORD
+       - MYSQL_ROOT_PASSWORD
+     #   - server-key.pem
+     #   - server-cert.pem
+     #   - root-ca.pem
+   stop_grace_period: 1m
+   networks:
+       frontend:
+
+
+         # db-data-mysql:
+         #image: "${BUSYBOX_IMAGE}:${BUSYBOX_IMAGE_TAG}"
+         #volumes:
+         #- ${DATA_DIRECTORY}/var/lib/mysql:/var/lib/mysql:rw
+
+
+networks:
+  frontend:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "${FRONTEND_ENABLE_IPV6}"
+    ipam:
+      #driver: "${FRONTEND_NETWORK_DRIVER}"
+      config:
+      - subnet: "${FRONTEND_SUBNET}"
+
+volumes:
+  snmptraps:
+#  dbsocket:
+
+secrets:
+  MYSQL_USER:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_USER
+  MYSQL_PASSWORD:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_PASSWORD
+  MYSQL_ROOT_USER:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_ROOT_USER
+  MYSQL_ROOT_PASSWORD:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_ROOT_PASSWORD
+#  client-key.pem:
+#    file: ${ENV_VARS_DIRECTORY}/.ZBX_DB_KEY_FILE
+#  client-cert.pem:
+#    file: ${ENV_VARS_DIRECTORY}/.ZBX_DB_CERT_FILE
+#  root-ca.pem:
+#    file: ${ENV_VARS_DIRECTORY}/.ZBX_DB_CA_FILE
+#  server-cert.pem:
+#    file: ${ENV_VARS_DIRECTORY}/.DB_CERT_FILE
+#  server-key.pem:
+#    file: ${ENV_VARS_DIRECTORY}/.DB_KEY_FILE
