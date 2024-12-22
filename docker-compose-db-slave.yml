@@ -1,0 +1,61 @@
+version: '3.6'
+services:
+  mysql-server:
+   image: "${MYSQL_IMAGE}:${MYSQL_IMAGE_TAG}"
+   command:
+       - mysqld
+       - --server-id=2                 # Unique server ID for replication
+       - --log-bin=mysql-bin            # Enable binary logging
+       - --binlog-format=ROW            # Use ROW-based binary log format
+       - --binlog-do-db=zabbix            # Restrict binary logging to 'pdns' database
+       - --skip-mysqlx                  # (Optional) Disable MySQL X plugin
+       - --relay_log=relay-bin
+       - --read-only=ON
+       - --character-set-server=utf8mb4
+       - --collation-server=utf8mb4_bin
+       - --log_bin_trust_function_creators=1
+     # Use TLS encryption for connections to database
+     #   - --require-secure-transport
+     #   - --ssl-ca=/run/secrets/root-ca.pem
+     #   - --ssl-cert=/run/secrets/server-cert.pem
+     #   - --ssl-key=/run/secrets/server-key.pem
+   restart: "${RESTART_POLICY}"
+   attach: false
+   volumes:
+       - ${DATA_DIRECTORY}/var/lib/mysql:/var/lib/mysql:rw
+       - ${ENV_VARS_DIRECTORY}/mysql_init/init_proxy_db.sql:/docker-entrypoint-initdb.d/mysql_init_proxy.sql:ro
+     #   - dbsocket:/var/run/mysqld/
+   env_file:
+       - ${ENV_VARS_DIRECTORY}/.env_db_mysql
+   environment:
+       - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/MYSQL_ROOT_PASSWORD
+   secrets:
+       - MYSQL_USER
+       - MYSQL_PASSWORD
+       - MYSQL_ROOT_PASSWORD
+     #   - server-key.pem
+     #   - server-cert.pem
+     #   - root-ca.pem
+   stop_grace_period: 1m
+   networks:
+       frontend:
+
+networks:
+  frontend:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "${FRONTEND_ENABLE_IPV6}"
+    ipam:
+      #driver: "${FRONTEND_NETWORK_DRIVER}"
+      config:
+      - subnet: "${FRONTEND_SUBNET}"
+
+secrets:
+  MYSQL_USER:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_USER
+  MYSQL_PASSWORD:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_PASSWORD
+  MYSQL_ROOT_USER:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_ROOT_USER
+  MYSQL_ROOT_PASSWORD:
+    file: ${ENV_VARS_DIRECTORY}/.MYSQL_ROOT_PASSWORD
